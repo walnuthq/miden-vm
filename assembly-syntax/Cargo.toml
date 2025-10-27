@@ -23,6 +23,7 @@ std = [
     "miden-utils-diagnostics/std",
     "thiserror/std",
 ]
+fancy = ["miden-utils-diagnostics/fancy"]
 serde = ["miden-debug-types/serde", "midenc-hir-type/serde", "semver/serde"]
 arbitrary = ["dep:proptest", "dep:proptest-derive"]
 testing = ["arbitrary", "logging"]

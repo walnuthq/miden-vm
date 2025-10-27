@@ -4,13 +4,17 @@ use core::fmt;
 pub use miette::{
     DebugReportHandler, JSONReportHandler, NarratableReportHandler, ReportHandler, set_hook,
 };
-#[cfg(feature = "std")]
-pub use miette::{GraphicalReportHandler, GraphicalTheme, set_panic_hook};
+#[cfg(feature = "fancy")]
+pub use miette::{GraphicalReportHandler, GraphicalTheme, MietteHandlerOpts, set_panic_hook};
 
+#[cfg(feature = "fancy")]
 pub type ReportHandlerOpts = miette::MietteHandlerOpts;
 
-#[cfg(feature = "std")]
+#[cfg(feature = "fancy")]
 pub type DefaultReportHandler = miette::GraphicalReportHandler;
+
+#[cfg(all(feature = "std", not(feature = "fancy")))]
+pub type DefaultReportHandler = miette::DebugReportHandler;
 
 #[cfg(not(feature = "std"))]
 pub type DefaultReportHandler = miette::DebugReportHandler;
@@ -25,14 +29,14 @@ impl<D: AsRef<dyn super::Diagnostic>> PrintDiagnostic<D> {
     pub fn new(diag: D) -> Self {
         Self { handler: Default::default(), diag }
     }
-    #[cfg(feature = "std")]
+    #[cfg(feature = "fancy")]
     pub fn new_without_color(diag: D) -> Self {
         Self {
             handler: DefaultReportHandler::new_themed(GraphicalTheme::none()),
             diag,
         }
     }
-    #[cfg(not(feature = "std"))]
+    #[cfg(not(feature = "fancy"))]
     pub fn new_without_color(diag: D) -> Self {
         Self::new(diag)
     }

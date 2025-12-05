@@ -6,7 +6,7 @@ use alloc::{sync::Arc, vec::Vec};
 use miden_air::RowIndex;
 use miden_core::{
     EventId, EventName, Felt, QuadFelt, Word,
-    mast::{DecoratorId, MastForest, MastNodeErrorContext, MastNodeId},
+    mast::{DecoratorId, MastForest, MastNode, MastNodeErrorContext, MastNodeId},
     stack::MIN_STACK_DEPTH,
     utils::to_hex,
 };
@@ -512,6 +512,10 @@ pub trait ErrorContext {
 pub struct ErrorContextImpl {
     label: SourceSpan,
     source_file: Option<Arc<SourceFile>>,
+    /// Fallback label from the caller (CALL/DYNCALL instruction), used when the primary
+    /// location is unknown/synthetic (e.g., inside compiler-generated intrinsic stubs).
+    caller_label: Option<SourceSpan>,
+    caller_source_file: Option<Arc<SourceFile>>,
 }
 
 impl ErrorContextImpl {
@@ -523,7 +527,12 @@ impl ErrorContextImpl {
     ) -> Self {
         let (label, source_file) =
             Self::precalc_label_and_source_file(None, mast_forest, node, host);
-        Self { label, source_file }
+        Self {
+            label,
+            source_file,
+            caller_label: None,
+            caller_source_file: None,
+        }
     }
 
     #[allow(dead_code)]
@@ -536,7 +545,34 @@ impl ErrorContextImpl {
         let op_idx = op_idx.into();
         let (label, source_file) =
             Self::precalc_label_and_source_file(op_idx, mast_forest, node, host);
-        Self { label, source_file }
+        Self {
+            label,
+            source_file,
+            caller_label: None,
+            caller_source_file: None,
+        }
+    }
+
+    /// Sets the caller location as a fallback for error reporting.
+    ///
+    /// This is used when we're inside a CALL/DYNCALL and the current instruction has an
+    /// unknown/synthetic location. The caller's location (the CALL instruction) will be
+    /// used instead.
+    #[allow(dead_code)]
+    pub fn with_caller_fallback(
+        mut self,
+        mast_forest: &MastForest,
+        caller_node_id: MastNodeId,
+        host: &impl BaseHost,
+    ) -> Self {
+        // Get the location of the caller node (the CALL/DYNCALL instruction)
+        if let Some(caller_node) = mast_forest.get_node_by_id(caller_node_id) {
+            let (caller_label, caller_source_file) =
+                Self::precalc_label_and_source_file_for_node(mast_forest, caller_node, host);
+            self.caller_label = Some(caller_label);
+            self.caller_source_file = caller_source_file;
+        }
+        self
     }
 
     fn precalc_label_and_source_file(
@@ -552,10 +588,44 @@ impl ErrorContextImpl {
                 |location| host.get_label_and_source_file(location),
             )
     }
+
+    fn precalc_label_and_source_file_for_node(
+        mast_forest: &MastForest,
+        node: &MastNode,
+        host: &impl BaseHost,
+    ) -> (SourceSpan, Option<Arc<SourceFile>>) {
+        // Get the assembly op location based on node type
+        // CALL and DYN nodes can have decorators that contain source location info
+        let location = match node {
+            MastNode::Call(call_node) => call_node
+                .get_assembly_op(mast_forest, None)
+                .and_then(|op| op.location()),
+            MastNode::Dyn(dyn_node) => dyn_node
+                .get_assembly_op(mast_forest, None)
+                .and_then(|op| op.location()),
+            // Other node types don't typically have source locations we'd want as fallback
+            _ => None,
+        };
+
+        location.map_or_else(
+            || (SourceSpan::UNKNOWN, None),
+            |location| host.get_label_and_source_file(location),
+        )
+    }
 }
 
 impl ErrorContext for ErrorContextImpl {
     fn label_and_source_file(&self) -> (SourceSpan, Option<Arc<SourceFile>>) {
+        // If the primary location is unknown/has no source file, try to use the caller's location
+        if self.source_file.is_none() {
+            if let (Some(caller_label), caller_source_file) =
+                (self.caller_label, self.caller_source_file.clone())
+            {
+                if caller_source_file.is_some() {
+                    return (caller_label, caller_source_file);
+                }
+            }
+        }
         (self.label, self.source_file.clone())
     }
 }

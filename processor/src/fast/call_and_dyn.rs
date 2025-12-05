@@ -48,7 +48,7 @@ impl FastProcessor {
             .ok_or(ExecutionError::MastNodeNotFoundInForest { node_id: call_node.callee() })?
             .digest();
 
-        self.save_context_and_truncate_stack(tracer);
+        self.save_context_and_truncate_stack(tracer, current_node_id, current_forest);
 
         if call_node.is_syscall() {
             // check if the callee is in the kernel
@@ -163,7 +163,7 @@ impl FastProcessor {
             let new_ctx: ContextId = self.get_next_ctx_id();
 
             // Save the current state, and update the system registers.
-            self.save_context_and_truncate_stack(tracer);
+            self.save_context_and_truncate_stack(tracer, current_node_id, current_forest);
 
             self.ctx = new_ctx;
             self.caller_hash = callee_hash;
@@ -259,7 +259,16 @@ impl FastProcessor {
 
     /// Saves the current execution context and truncates the stack to 16 elements in preparation to
     /// start a new execution context.
-    fn save_context_and_truncate_stack(&mut self, tracer: &mut impl Tracer) {
+    ///
+    /// `caller_node_id` is the MastNodeId of the CALL/DYNCALL instruction, and `caller_forest`
+    /// is the MastForest it belongs to. These are used for error reporting fallback when the
+    /// callee has unknown source location.
+    fn save_context_and_truncate_stack(
+        &mut self,
+        tracer: &mut impl Tracer,
+        caller_node_id: MastNodeId,
+        caller_forest: &Arc<MastForest>,
+    ) {
         let overflow_stack = if self.stack_size() > MIN_STACK_DEPTH {
             // save the overflow stack, and zero out the buffer.
             //
@@ -280,6 +289,7 @@ impl FastProcessor {
             overflow_stack,
             ctx: self.ctx,
             fn_hash: self.caller_hash,
+            caller_info: Some((caller_node_id, caller_forest.clone())),
         });
 
         tracer.start_context();

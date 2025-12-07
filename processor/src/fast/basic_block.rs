@@ -167,15 +167,7 @@ impl FastProcessor {
             // whereas all the other operations are synchronous (resulting in a significant
             // performance improvement).
             {
-                // Create error context with caller fallback for better error reporting
-                // when inside compiler-generated stubs with synthetic locations
                 let err_ctx = err_ctx!(program, basic_block, host, op_idx_in_block);
-                let err_ctx = if let Some((caller_node_id, caller_forest)) = self.get_caller_info()
-                {
-                    err_ctx.with_caller_fallback(caller_forest, caller_node_id, host)
-                } else {
-                    err_ctx
-                };
                 match op {
                     Operation::Emit => self.op_emit(host, &err_ctx).await?,
                     _ => {

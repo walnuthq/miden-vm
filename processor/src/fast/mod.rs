@@ -728,18 +728,6 @@ impl FastProcessor {
     pub fn state(&mut self) -> ProcessState<'_> {
         ProcessState::Fast(FastProcessState { processor: self })
     }
-
-    /// Returns the MastNodeId and MastForest of the most recent CALL/DYNCALL instruction that
-    /// created the current execution context, if we are inside a call.
-    ///
-    /// This is used as a fallback for error reporting when the current instruction has an
-    /// unknown/synthetic source location (e.g., inside compiler-generated intrinsic stubs).
-    #[inline(always)]
-    pub fn get_caller_info(&self) -> Option<(MastNodeId, &Arc<MastForest>)> {
-        self.call_stack
-            .last()
-            .and_then(|ctx| ctx.caller_info.as_ref().map(|(id, forest)| (*id, forest)))
-    }
 }
 
 // EXECUTION CONTEXT INFO
@@ -756,8 +744,4 @@ struct ExecutionContextInfo {
     overflow_stack: Vec<Felt>,
     ctx: ContextId,
     fn_hash: Word,
-    /// The MastNodeId of the CALL/DYNCALL instruction that created this context, along with
-    /// the MastForest it belongs to. Used as a fallback for error reporting when the current
-    /// instruction has unknown location.
-    caller_info: Option<(MastNodeId, Arc<MastForest>)>,
 }

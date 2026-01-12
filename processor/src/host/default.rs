@@ -198,6 +198,7 @@ where
 // ================================================================================================
 
 /// A Host which does nothing.
+#[allow(dead_code)]
 pub struct NoopHost;
 
 impl BaseHost for NoopHost {

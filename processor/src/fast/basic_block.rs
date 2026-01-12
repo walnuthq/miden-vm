@@ -181,7 +181,7 @@ impl FastProcessor {
                     Operation::Emit => self.op_emit(host, &err_ctx).await?,
                     _ => {
                         // if the operation is not an Emit, we execute it normally
-                        self.execute_sync_op(op, op_idx_in_block, program, host, &err_ctx, tracer)?;
+                        self.execute_sync_op(op, op_idx_in_block, program, &err_ctx, tracer)?;
                     },
                 }
             }

@@ -67,7 +67,7 @@ pub use host::{
     debug::DefaultDebugHandler,
     default::{DefaultHost, HostLibrary},
     handlers::{
-        AssertError, DebugError, DebugHandler, EventError, EventHandler, EventHandlerRegistry,
+        DebugError, DebugHandler, EventError, EventHandler, EventHandlerRegistry,
         NoopEventHandler, TraceError,
     },
 };

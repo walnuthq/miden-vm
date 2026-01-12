@@ -2,7 +2,7 @@ use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
 use miden_core::{Felt, Operation, mast::MastForest};
 
 use crate::{
-    BaseHost, ErrorContext, ExecutionError,
+    ErrorContext, ExecutionError,
     fast::Tracer,
     processor::{Processor, StackInterface},
 };
@@ -33,7 +33,6 @@ pub(super) fn execute_sync_op(
     op: &Operation,
     op_idx_in_block: usize,
     current_forest: &MastForest,
-    host: &mut impl BaseHost,
     err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
 ) -> Result<Option<[Felt; NUM_USER_OP_HELPERS]>, ExecutionError> {
@@ -45,7 +44,7 @@ pub(super) fn execute_sync_op(
             // do nothing
         },
         Operation::Assert(err_code) => {
-            sys_ops::op_assert(processor, *err_code, host, current_forest, err_ctx, tracer)?
+            sys_ops::op_assert(processor, *err_code, current_forest, err_ctx, tracer)?
         },
         Operation::SDepth => sys_ops::op_sdepth(processor, tracer)?,
         Operation::Caller => sys_ops::op_caller(processor)?,

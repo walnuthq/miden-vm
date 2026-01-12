@@ -19,7 +19,7 @@ impl Process {
         &mut self,
         err_code: Felt,
         program: &MastForest,
-        host: &mut H,
+        _host: &mut H,
         err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError>
     where
@@ -28,9 +28,8 @@ impl Process {
         if self.stack.get(0) != ONE {
             let process = &mut self.state();
             let clk = process.clk();
-            let err = host.on_assert_failed(process, err_code);
             let err_msg = program.resolve_error_message(err_code);
-            return Err(ExecutionError::failed_assertion(clk, err_code, err_msg, err, err_ctx));
+            return Err(ExecutionError::failed_assertion(clk, err_code, err_msg, err_ctx));
         }
         self.stack.shift_left(1);
         Ok(())

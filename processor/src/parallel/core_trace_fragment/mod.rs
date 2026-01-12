@@ -27,7 +27,6 @@ use crate::{
             HasherResponseReplay, MemoryReadsReplay, NodeExecutionState,
         },
     },
-    host::default::NoopHost,
     parallel::CORE_TRACE_WIDTH,
     processor::{OperationHelperRegisters, Processor, StackInterface, SystemInterface},
     utils::split_u32_into_u16,
@@ -428,7 +427,6 @@ impl<'a> CoreTraceFragmentFiller<'a> {
                         op,
                         0,
                         current_forest,
-                        &mut NoopHost,
                         &(),
                         &mut NoopTracer,
                     )

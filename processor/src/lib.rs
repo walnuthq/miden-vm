@@ -687,13 +687,13 @@ impl Process {
                     host.on_trace(process, *id)?;
                 }
             },
-            Decorator::DebugVar(_debug_var) => {
-                // DebugVar is strictly a metadata-carrying decorator used by downstream
-                // tools (debuggers, profilers) to associate source variable information
-                // with specific execution points.
-                //
-                // During execution, no action is needed. A future implementation
-                // might support callbacks like on_variable.
+            Decorator::DebugVar(debug_var) => {
+                // DebugVar decorators provide source variable information for debuggers.
+                // Only notify the host when debug mode is enabled.
+                if self.decoder.in_debug_mode() {
+                    let process = &self.state();
+                    host.on_debug_var(process, debug_var)?;
+                }
             },
         };
         Ok(())

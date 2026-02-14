@@ -1001,6 +1001,17 @@ pub struct ExecutionOutput {
     pub final_pc_transcript: PrecompileTranscript,
 }
 
+impl crate::ProgramExecutor for FastProcessor {
+    fn execute<H: crate::Host + Send>(
+        self,
+        program: &crate::Program,
+        host: &mut H,
+    ) -> impl crate::FutureMaybeSend<Result<ExecutionOutput, crate::ExecutionError>> {
+        // Delegate to the inherent `execute` method on FastProcessor.
+        FastProcessor::execute(self, program, host)
+    }
+}
+
 // EXECUTION CONTEXT INFO
 // ===============================================================================================
 

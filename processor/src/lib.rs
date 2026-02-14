@@ -99,7 +99,7 @@ pub trait ProgramExecutor: Sized {
     ///
     /// This consumes the executor. Implementations should run the program to completion and return
     /// the resulting [`ExecutionOutput`].
-    fn execute<H: Host>(
+    fn execute<H: Host + Send>(
         self,
         program: &Program,
         host: &mut H,

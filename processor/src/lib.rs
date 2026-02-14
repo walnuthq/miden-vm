@@ -83,6 +83,29 @@ pub mod operation {
 
 pub mod trace;
 
+// PROGRAM EXECUTOR
+// ================================================================================================
+
+/// A trait for types that can execute Miden programs.
+///
+/// This trait abstracts over the execution engine, allowing different implementations (e.g.,
+/// [`FastProcessor`] for production use, or a debug executor for enhanced diagnostics) to be used
+/// interchangeably.
+///
+/// Implementations are expected to be configured with stack/advice inputs at construction time,
+/// then consumed by a single call to [`execute`](ProgramExecutor::execute).
+pub trait ProgramExecutor: Sized {
+    /// Execute the given program with the provided host.
+    ///
+    /// This consumes the executor. Implementations should run the program to completion and return
+    /// the resulting [`ExecutionOutput`].
+    fn execute<H: Host>(
+        self,
+        program: &Program,
+        host: &mut H,
+    ) -> impl FutureMaybeSend<Result<ExecutionOutput, ExecutionError>>;
+}
+
 // EXECUTORS
 // ================================================================================================
 

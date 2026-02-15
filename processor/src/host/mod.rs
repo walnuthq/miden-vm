@@ -30,7 +30,7 @@ pub use mast_forest_store::{MastForestStore, MemMastForestStore};
 // ================================================================================================
 
 /// Any possible way an event can modify the advice provider.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AdviceMutation {
     ExtendStack { values: Vec<Felt> },
     ExtendMap { other: AdviceMap },

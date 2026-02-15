@@ -27,7 +27,7 @@ std = [
     "miden-utils-diagnostics/std",
     "thiserror/std",
 ]
-testing = ["miden-air/testing"]
+testing = ["miden-air/testing", "miden-core/testing"]
 # Like `testing`, but slows down the processor speed to make it easier to debug.
 bus-debugger = ["testing", "miden-air/testing"]
 

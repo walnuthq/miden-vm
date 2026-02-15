@@ -106,6 +106,47 @@ pub trait ProgramExecutor: Sized {
     ) -> impl FutureMaybeSend<Result<ExecutionOutput, ExecutionError>>;
 }
 
+// PROGRAM EXECUTOR FACTORY
+// ================================================================================================
+
+/// A factory for creating [`ProgramExecutor`] instances.
+///
+/// This trait abstracts over the construction of program executors, allowing different
+/// implementations (e.g., [`DefaultExecutorFactory`] for production, or a debug executor factory
+/// for enhanced diagnostics) to be plugged into the transaction execution pipeline.
+///
+/// Configuration (stack inputs, advice inputs, execution options) is passed to the factory at
+/// creation time, matching the expectation of [`ProgramExecutor`] that these are set at
+/// construction.
+pub trait ProgramExecutorFactory {
+    /// The type of executor this factory creates.
+    type Executor: ProgramExecutor;
+
+    /// Create a new program executor configured with the given inputs and options.
+    fn create_executor(
+        stack_inputs: StackInputs,
+        advice_inputs: AdviceInputs,
+        options: ExecutionOptions,
+    ) -> Self::Executor;
+}
+
+/// Default factory that creates [`FastProcessor`] instances for production use.
+pub struct DefaultExecutorFactory;
+
+impl ProgramExecutorFactory for DefaultExecutorFactory {
+    type Executor = FastProcessor;
+
+    fn create_executor(
+        stack_inputs: StackInputs,
+        advice_inputs: AdviceInputs,
+        options: ExecutionOptions,
+    ) -> FastProcessor {
+        FastProcessor::new(stack_inputs)
+            .with_advice(advice_inputs)
+            .with_options(options)
+    }
+}
+
 // EXECUTORS
 // ================================================================================================
 

@@ -20,17 +20,18 @@ use crate::{
 };
 
 struct TestLogger {
-    messages: Mutex<Vec<String>>,
+    messages: Mutex<Vec<(log::Level, String)>>,
 }
 
 impl log::Log for TestLogger {
     fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
-        metadata.level() <= log::Level::Warn
+        // The untrusted overspecification diagnostic is emitted at debug level.
+        metadata.level() <= log::Level::Debug
     }
 
     fn log(&self, record: &log::Record<'_>) {
         if self.enabled(record.metadata()) {
-            self.messages.lock().unwrap().push(record.args().to_string());
+            self.messages.lock().unwrap().push((record.level(), record.args().to_string()));
         }
     }
 
@@ -41,11 +42,14 @@ static TEST_LOGGER: TestLogger = TestLogger { messages: Mutex::new(Vec::new()) }
 static TEST_LOGGER_INIT: Once = Once::new();
 static TEST_LOGGER_GUARD: Mutex<()> = Mutex::new(());
 
-fn with_captured_error_logs<T>(f: impl FnOnce() -> T) -> (T, Vec<String>) {
-    with_captured_logs(log::LevelFilter::Error, f)
+fn with_captured_debug_logs<T>(f: impl FnOnce() -> T) -> (T, Vec<(log::Level, String)>) {
+    with_captured_logs(log::LevelFilter::Debug, f)
 }
 
-fn with_captured_logs<T>(level: log::LevelFilter, f: impl FnOnce() -> T) -> (T, Vec<String>) {
+fn with_captured_logs<T>(
+    level: log::LevelFilter,
+    f: impl FnOnce() -> T,
+) -> (T, Vec<(log::Level, String)>) {
     TEST_LOGGER_INIT.call_once(|| {
         log::set_logger(&TEST_LOGGER).expect("test logger should be installed once");
     });
@@ -1742,12 +1746,15 @@ fn assert_untrusted_overspec_logging(
     expected_nodes: u32,
     expected_log_fragments: &[&str],
 ) {
-    let (result, logs) = with_captured_error_logs(|| UntrustedMastForest::read_from_bytes(bytes));
+    let (result, logs) = with_captured_debug_logs(|| UntrustedMastForest::read_from_bytes(bytes));
 
     let untrusted = result.unwrap();
     assert_eq!(logs.len(), expected_log_fragments.len());
     for expected in expected_log_fragments {
-        assert!(logs.iter().any(|msg| msg.contains(expected)));
+        assert!(
+            logs.iter()
+                .any(|(level, msg)| *level == log::Level::Debug && msg.contains(expected))
+        );
     }
     assert_eq!(untrusted.validate().unwrap().num_nodes(), expected_nodes);
 

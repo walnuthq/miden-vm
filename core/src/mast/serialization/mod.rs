@@ -795,9 +795,10 @@ pub(super) fn read_untrusted_with_flags_and_allocation_budget<R: ByteReader>(
     Ok((forest, flags.bits()))
 }
 
+/// Logged at debug level: validation just recomputes the wire digests, so reads still succeed.
 fn log_untrusted_overspecification(flags: WireFlags) {
     if !flags.is_hashless() {
-        log::error!(
+        log::debug!(
             "UntrustedMastForest expected HASHLESS input; supplied artifact includes wire node hashes, and validation will recompute them and require them to match"
         );
     }

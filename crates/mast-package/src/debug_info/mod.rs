@@ -24,7 +24,7 @@ pub use types::*;
 type FxHashMap<K, V> = hashbrown::HashMap<K, V, rustc_hash::FxBuildHasher>;
 type FxHashSet<K> = hashbrown::HashSet<K, rustc_hash::FxBuildHasher>;
 
-pub const DEBUG_INFO_VERSION: u8 = 3;
+pub const DEBUG_INFO_VERSION: u8 = 4;
 
 /// Maximum encoded payload size accepted for package-owned debug information.
 ///
@@ -521,6 +521,26 @@ impl<Exec: Idx, Src: Idx> DebugInfo<Exec, Src> {
         self.inline_calls_for_source_node(source_node)
             .filter(move |row| row.op_idx == op_idx)
     }
+
+    /// Returns physical call-frame rows for a source/debug occurrence.
+    pub fn call_frames_for_source_node(
+        &self,
+        source_node: Src,
+    ) -> impl Iterator<Item = &DebugSourceCallFrame> {
+        self.source_node(source_node)
+            .into_iter()
+            .flat_map(|node| node.call_frames.iter())
+    }
+
+    /// Returns the active physical call-frame chain for `source_node` at `op_idx`.
+    pub fn call_frames_for_operation(
+        &self,
+        source_node: Src,
+        op_idx: u32,
+    ) -> impl Iterator<Item = &DebugSourceCallFrame> {
+        self.call_frames_for_source_node(source_node)
+            .filter(move |row| row.op_start <= op_idx && op_idx < row.op_end)
+    }
 }
 
 impl<Exec: Idx, Src: Idx> DebugInfo<Exec, Src> {
@@ -868,6 +888,7 @@ impl<Src: SourceNodeIdMarker> DebugInfo<MastNodeId, Src> {
                         asm_ops,
                         debug_vars,
                         inline_calls: Vec::with_capacity(source_node.inline_calls.len()),
+                        call_frames: Vec::with_capacity(source_node.call_frames.len()),
                     })
                     .expect("too many nodes");
                 debug_assert_eq!(new_index, remapped_nodes[&prev_index],);
@@ -914,7 +935,7 @@ impl<Src: SourceNodeIdMarker> DebugInfo<MastNodeId, Src> {
 
             for (prev, new) in remapped_nodes.iter() {
                 let source_node = debug_info.source_node(*prev).unwrap();
-                if source_node.inline_calls.is_empty() {
+                if source_node.inline_calls.is_empty() && source_node.call_frames.is_empty() {
                     continue;
                 }
                 let target_node = &mut builder[*new];
@@ -935,6 +956,20 @@ impl<Src: SourceNodeIdMarker> DebugInfo<MastNodeId, Src> {
                         op_idx: row.op_idx,
                         callee_idx,
                         loc_idx,
+                    });
+                }
+                for row in source_node.call_frames.iter() {
+                    let function_idx = tables.function(row.function_idx).ok_or(
+                        DebugInfoMergeError::MissingFunctionMapping {
+                            forest_index,
+                            function_idx: row.function_idx,
+                        },
+                    )?;
+                    target_node.call_frames.push(DebugSourceCallFrame {
+                        op_start: row.op_start,
+                        op_end: row.op_end,
+                        function_idx,
+                        inherited_inline_calls: row.inherited_inline_calls,
                     });
                 }
             }

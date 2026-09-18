@@ -336,6 +336,10 @@ impl Procedure {
         MastNodeUse::new(self.body_node_ref, self.body_source_ref)
     }
 
+    pub(crate) fn set_body_source_ref(&mut self, source_ref: SourceNodeRef) {
+        self.body_source_ref = source_ref;
+    }
+
     pub(crate) fn body_source_ref(&self) -> SourceNodeRef {
         self.body_source_ref
     }

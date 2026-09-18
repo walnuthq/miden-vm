@@ -38,7 +38,7 @@ mod step;
 
 pub use basic_block::SystemEventError;
 pub use memory::Memory;
-pub use step::{BreakReason, ResumeContext};
+pub use step::{BreakReason, DebugCallFrame, ResumeContext};
 
 #[cfg(test)]
 mod tests;

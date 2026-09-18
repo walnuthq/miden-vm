@@ -402,8 +402,8 @@ const _DEBUG_LOC_SIZE_CHECK: () = const {
 /// treat the [`DebugSourceNodeId`] as the identity of the source occurrence and use `exec_node`
 /// only to find the executable node it describes.
 ///
-/// Assembly-operation, variable, and inline-call rows are stored directly on each source
-/// occurrence.
+/// Assembly-operation, variable, inline-call, and call-frame rows are stored directly on each
+/// source occurrence.
 pub type DebugSourceNode = SourceNode<MastNodeId, DebugSourceNodeId>;
 
 /// A source/debug occurrence for code that produced an executable MAST node.
@@ -429,9 +429,20 @@ pub struct SourceNode<Exec: Idx, Src: Idx> {
     /// inline chain inherited by the resolved target rather than an operation on the external
     /// node.
     pub inline_calls: Vec<DebugSourceInlineCall>,
+    /// Active procedure frames, ordered outermost to innermost, over half-open operation ranges.
+    pub call_frames: Vec<DebugSourceCallFrame>,
 }
 
 impl<Exec: Idx, Src: Idx> SourceNode<Exec, Src> {
+    pub fn call_frames_for_operation(
+        &self,
+        op_idx: u32,
+    ) -> impl Iterator<Item = &DebugSourceCallFrame> + '_ {
+        self.call_frames
+            .iter()
+            .filter(move |row| row.op_start <= op_idx && op_idx < row.op_end)
+    }
+
     pub fn asm_op_for_operation(&self, op_idx: u32) -> Option<&DebugSourceAsmOp> {
         let insertion_index = self.asm_ops.partition_point(|row| row.op_idx <= op_idx);
         insertion_index.checked_sub(1).and_then(|index| self.asm_ops.get(index))
@@ -569,6 +580,24 @@ pub struct DebugSourceInlineCall {
     pub callee_idx: DebugFunctionIdx,
     /// Call-site source location index in the debug locations table.
     pub loc_idx: DebugLocIdx,
+}
+
+/// Physical call-frame range keyed by a source/debug MAST occurrence.
+///
+/// All ranges containing an operation form its active source-level call chain, ordered outermost
+/// to innermost. These rows are needed when static linking folds procedure boundaries into one
+/// executable basic block.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[repr(C)]
+pub struct DebugSourceCallFrame {
+    /// Inclusive operation index at which this frame becomes active.
+    pub op_start: u32,
+    /// Exclusive operation index at which this frame stops being active.
+    pub op_end: u32,
+    /// Active function index in the debug functions table.
+    pub function_idx: DebugFunctionIdx,
+    /// Number of enclosing inline rows belonging to callers, not this physical frame.
+    pub inherited_inline_calls: u32,
 }
 
 // DEBUG ERROR MESSAGES
@@ -1753,6 +1782,7 @@ mod tests {
             asm_ops: Vec::new(),
             debug_vars: Vec::new(),
             inline_calls: Vec::new(),
+            call_frames: Vec::new(),
         }
     }
 
@@ -2345,6 +2375,42 @@ mod tests {
     }
 
     #[test]
+    fn test_debug_call_frame_ranges_are_half_open_and_ordered() {
+        let outer = DebugSourceCallFrame {
+            op_start: 1,
+            op_end: 7,
+            function_idx: DebugFunctionIdx::from(0),
+            inherited_inline_calls: 0,
+        };
+        let inner = DebugSourceCallFrame {
+            op_start: 3,
+            op_end: 5,
+            function_idx: DebugFunctionIdx::from(1),
+            inherited_inline_calls: 0,
+        };
+        let mut builder = PackageDebugInfoBuilder::default();
+        let mut node = source_node(MastNodeId::new_unchecked(0), Vec::new(), 0, 8);
+        node.call_frames.extend([outer, inner]);
+        let source = builder.add_node(node).unwrap();
+        let debug_info = builder.build();
+
+        assert!(debug_info.call_frames_for_operation(source, 0).next().is_none());
+        assert_eq!(
+            debug_info.call_frames_for_operation(source, 1).collect::<Vec<_>>(),
+            vec![&outer],
+        );
+        assert_eq!(
+            debug_info.call_frames_for_operation(source, 3).collect::<Vec<_>>(),
+            vec![&outer, &inner],
+        );
+        assert_eq!(
+            debug_info.call_frames_for_operation(source, 5).collect::<Vec<_>>(),
+            vec![&outer],
+        );
+        assert!(debug_info.call_frames_for_operation(source, 7).next().is_none());
+    }
+
+    #[test]
     fn merge_tables_into_validates_before_mutating_target() {
         let mut source = PackageDebugInfoBuilder::default();
         source.add_string("source");
@@ -2547,6 +2613,7 @@ mod tests {
                     value_location: DebugVarLocation::Stack(0),
                 }],
                 inline_calls: vec![DebugSourceInlineCall { op_idx: 0, callee_idx, loc_idx }],
+                call_frames: vec![],
             };
             assert_eq!(builder.add_node(node).unwrap(), source_node);
             builder.add_root(source_node);

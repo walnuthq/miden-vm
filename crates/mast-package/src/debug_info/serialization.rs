@@ -19,10 +19,10 @@ use zerocopy::{Immutable, IntoBytes, KnownLayout};
 use super::{
     DEBUG_INFO_VERSION, DebugErrorMessage, DebugFieldInfo, DebugFileIdx, DebugFileInfo,
     DebugFunctionIdx, DebugFunctionInfo, DebugLoc, DebugLocIdx, DebugPrimitiveType,
-    DebugSourceAsmOp, DebugSourceInlineCall, DebugSourceNode, DebugSourceNodeId, DebugSourceVar,
-    DebugStringIdx, DebugTypeIdx, DebugTypeInfo, DebugVariantInfo, MAX_DEBUG_INFO_PAYLOAD_SIZE,
-    MAX_DEBUG_INFO_STRING_ROWS, MAX_DEBUG_INFO_STRING_SIZE, MAX_DEBUG_INFO_TYPE_ROWS,
-    OptionalIndex, PackageDebugInfo,
+    DebugSourceAsmOp, DebugSourceCallFrame, DebugSourceInlineCall, DebugSourceNode,
+    DebugSourceNodeId, DebugSourceVar, DebugStringIdx, DebugTypeIdx, DebugTypeInfo,
+    DebugVariantInfo, MAX_DEBUG_INFO_PAYLOAD_SIZE, MAX_DEBUG_INFO_STRING_ROWS,
+    MAX_DEBUG_INFO_STRING_SIZE, MAX_DEBUG_INFO_TYPE_ROWS, OptionalIndex, PackageDebugInfo,
 };
 
 /// Base alignment for copied payloads. The assertions below ensure that this is sufficient for
@@ -309,7 +309,8 @@ impl Serializable for DebugSourceNode {
             size_of::<DebugSourceNode>()
                 + (self.asm_ops.len() * size_of::<DebugSourceAsmOp>())
                 + (self.debug_vars.len() * size_of::<DebugSourceVar>())
-                + (self.inline_calls.len() * size_of::<DebugSourceInlineCall>()),
+                + (self.inline_calls.len() * size_of::<DebugSourceInlineCall>())
+                + (self.call_frames.len() * size_of::<DebugSourceCallFrame>()),
         );
 
         output.write_u32(self.exec_node.into());
@@ -325,6 +326,7 @@ impl Serializable for DebugSourceNode {
 
         self.debug_vars.write_into(&mut output);
         self.inline_calls.write_into(&mut output);
+        self.call_frames.write_into(&mut output);
 
         target.write_usize(output.len());
         target.write_bytes(&output);
@@ -360,6 +362,7 @@ impl Deserializable for DebugSourceNode {
 
         let debug_vars = Vec::read_from(&mut source)?;
         let inline_calls = Vec::read_from(&mut source)?;
+        let call_frames = Vec::read_from(&mut source)?;
 
         let remaining_len = source.remaining_len();
         if remaining_len != 0 {
@@ -376,6 +379,7 @@ impl Deserializable for DebugSourceNode {
             asm_ops,
             debug_vars,
             inline_calls,
+            call_frames,
         })
     }
 
@@ -386,6 +390,7 @@ impl Deserializable for DebugSourceNode {
             + 1
             + Vec::<DebugSourceVar>::min_serialized_size()
             + Vec::<DebugSourceInlineCall>::min_serialized_size()
+            + Vec::<DebugSourceCallFrame>::min_serialized_size()
     }
 }
 
@@ -451,6 +456,37 @@ impl Deserializable for DebugSourceInlineCall {
 
     fn min_serialized_size() -> usize {
         4 + DebugFunctionIdx::min_serialized_size() + DebugLocIdx::min_serialized_size()
+    }
+}
+
+// DEBUG CALL FRAME SERIALIZATION
+// ================================================================================================
+
+impl Serializable for DebugSourceCallFrame {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        target.write_u32(self.op_start);
+        target.write_u32(self.op_end);
+        self.function_idx.write_into(target);
+        target.write_u32(self.inherited_inline_calls);
+    }
+}
+
+impl Deserializable for DebugSourceCallFrame {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let op_start = source.read_u32()?;
+        let op_end = source.read_u32()?;
+        let function_idx = DebugFunctionIdx::read_from(source)?;
+        let inherited_inline_calls = source.read_u32()?;
+        Ok(DebugSourceCallFrame {
+            op_start,
+            op_end,
+            function_idx,
+            inherited_inline_calls,
+        })
+    }
+
+    fn min_serialized_size() -> usize {
+        12 + DebugFunctionIdx::min_serialized_size()
     }
 }
 
@@ -927,6 +963,20 @@ mod tests {
     use super::*;
     use crate::debug_info::{DebugFileIdx, PackageDebugInfoBuilder};
 
+    #[test]
+    fn call_frame_wire_bytes_are_stable() {
+        let frame = DebugSourceCallFrame {
+            op_start: 0x01020304,
+            op_end: 0x05060708,
+            function_idx: DebugFunctionIdx::from(0x090a0b0c),
+            inherited_inline_calls: 2,
+        };
+        let bytes = [4, 3, 2, 1, 8, 7, 6, 5, 12, 11, 10, 9, 2, 0, 0, 0];
+        assert_eq!(frame.to_bytes(), bytes);
+        assert_eq!(DebugSourceCallFrame::read_from_bytes(&bytes).unwrap(), frame);
+        assert!(DebugSourceCallFrame::read_from_bytes(&bytes[..15]).is_err());
+    }
+
     struct FixedBudgetReader<'a> {
         inner: miden_core::serde::SliceReader<'a>,
         max_bytes: usize,
@@ -1098,6 +1148,7 @@ mod tests {
             asm_ops: Vec::new(),
             debug_vars: Vec::new(),
             inline_calls: Vec::new(),
+            call_frames: Vec::new(),
         };
         let serialized = source_node.to_bytes();
         let mut reader = miden_core::serde::SliceReader::new(&serialized);
@@ -1232,7 +1283,7 @@ mod tests {
     }
 
     #[test]
-    fn debug_function_v3_wire_bytes_are_stable() {
+    fn debug_function_v4_wire_bytes_are_stable() {
         const EXPECTED_ROW: [u8; size_of::<WireDebugFunctionInfo>()] = [
             1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0,
             0, 0, 0, 1, 0, 0, 0, 7, 0, 0, 0, 1, 0, 0, 0, 9, 0, 0, 0, 1, 0, 0, 0, 11, 0, 0, 0, 13,
@@ -1259,7 +1310,7 @@ mod tests {
         let debug_info = builder.build();
 
         let bytes = debug_info.to_bytes();
-        assert_eq!(bytes[0], 3);
+        assert_eq!(bytes[0], 4);
         assert!(
             bytes.windows(EXPECTED_ROW.len()).any(|window| window == EXPECTED_ROW),
             "serialized debug info did not contain the expected function row",
@@ -1282,6 +1333,7 @@ mod tests {
                 asm_ops: alloc::vec![],
                 debug_vars: alloc::vec![],
                 inline_calls: alloc::vec![],
+                call_frames: alloc::vec![],
             })
             .unwrap();
         let root = builder
@@ -1293,6 +1345,7 @@ mod tests {
                 asm_ops: alloc::vec![],
                 debug_vars: alloc::vec![],
                 inline_calls: alloc::vec![],
+                call_frames: alloc::vec![],
             })
             .unwrap();
         builder.add_root(root);
@@ -1349,6 +1402,12 @@ mod tests {
                     callee_idx: function_idx,
                     loc_idx: location_idx,
                 }],
+                call_frames: alloc::vec![DebugSourceCallFrame {
+                    op_start: 1,
+                    op_end: 3,
+                    function_idx,
+                    inherited_inline_calls: 0,
+                }],
             })
             .unwrap();
         builder.add_root(root);
@@ -1399,6 +1458,7 @@ mod tests {
                 ],
                 debug_vars: alloc::vec![],
                 inline_calls: alloc::vec![],
+                call_frames: alloc::vec![],
             })
             .unwrap();
         builder.add_root(root);
@@ -1437,6 +1497,7 @@ mod tests {
                 ],
                 debug_vars: alloc::vec![],
                 inline_calls: alloc::vec![],
+                call_frames: alloc::vec![],
             })
             .unwrap();
         builder.add_root(root);
@@ -1532,14 +1593,16 @@ mod tests {
     }
 
     #[test]
-    fn test_debug_info_v2_is_rejected() {
-        let bytes = [2];
-        let mut reader = miden_core::serde::SliceReader::new(&bytes);
-        let error = PackageDebugInfo::read_from(&mut reader).unwrap_err();
-        let DeserializationError::InvalidValue(message) = error else {
-            panic!("expected InvalidValue error");
-        };
-        assert!(message.contains("unsupported debug_info version: 2"));
+    fn test_older_debug_info_versions_are_rejected() {
+        for version in [2, 3] {
+            let bytes = [version];
+            let mut reader = miden_core::serde::SliceReader::new(&bytes);
+            let error = PackageDebugInfo::read_from(&mut reader).unwrap_err();
+            let DeserializationError::InvalidValue(message) = error else {
+                panic!("expected InvalidValue error");
+            };
+            assert!(message.contains(&format!("unsupported debug_info version: {version}")));
+        }
     }
 
     #[test]

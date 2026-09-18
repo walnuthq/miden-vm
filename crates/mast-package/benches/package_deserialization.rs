@@ -79,6 +79,7 @@ fn package_bytes(with_debug_info: bool) -> Vec<u8> {
                     .collect(),
                 debug_vars: Vec::new(),
                 inline_calls: Vec::new(),
+                call_frames: Vec::new(),
             })
             .expect("benchmark debug node should be valid");
         debug_info.add_root(source_node);
@@ -138,6 +139,7 @@ fn debug_info_with_asm_ops(row_count: usize) -> (Box<PackageDebugInfo>, DebugSou
                 .collect(),
             debug_vars: Vec::new(),
             inline_calls: Vec::new(),
+            call_frames: Vec::new(),
         })
         .expect("benchmark debug node should be valid");
     debug_info.add_root(source_node);

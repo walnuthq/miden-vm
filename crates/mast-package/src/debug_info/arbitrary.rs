@@ -98,6 +98,7 @@ impl Arbitrary for PackageDebugInfo {
                                 value_location: DebugVarLocation::Stack(0),
                             }],
                             inline_calls: vec![],
+                            call_frames: vec![],
                         })
                         .expect("two arbitrary source nodes fit in the source table");
                     let source_b = builder
@@ -122,6 +123,7 @@ impl Arbitrary for PackageDebugInfo {
                                 value_location: DebugVarLocation::Memory(error_code as u32),
                             }],
                             inline_calls: vec![],
+                            call_frames: vec![],
                         })
                         .expect("two arbitrary source nodes fit in the source table");
 
@@ -159,6 +161,18 @@ impl Arbitrary for PackageDebugInfo {
                         op_idx: 1,
                         callee_idx: function_a,
                         loc_idx: location_b,
+                    });
+                    builder[source_a].call_frames.push(DebugSourceCallFrame {
+                        op_start: 0,
+                        op_end: 2,
+                        function_idx: function_a,
+                        inherited_inline_calls: 0,
+                    });
+                    builder[source_b].call_frames.push(DebugSourceCallFrame {
+                        op_start: 0,
+                        op_end: 2,
+                        function_idx: function_b,
+                        inherited_inline_calls: 0,
                     });
                     builder.add_root(source_a);
                     builder.add_root(source_b);

@@ -408,6 +408,7 @@ fn debug_bearing_static_package(
                 value_location: DebugVarLocation::Stack(0),
             }],
             inline_calls: vec![],
+            call_frames: vec![],
         })
         .expect("test package source node should build");
     debug_info.add_root(source_root);

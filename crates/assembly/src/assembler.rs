@@ -686,6 +686,7 @@ impl Assembler {
                 let procedure = pctx.into_procedure(digest, node);
                 self.linker.register_procedure_root(gid, digest);
                 mast_forest_builder.insert_procedure(gid, procedure, &self.source_manager)?;
+                let node = mast_forest_builder.get_procedure(gid).unwrap().body_node_use();
                 PendingPackageExport::Procedure(PendingProcedureExport {
                     digest,
                     path: symbol_path,

@@ -1140,6 +1140,7 @@ mod error_assertions {
             asm_ops,
             debug_vars: Vec::new(),
             inline_calls: Vec::new(),
+            call_frames: Vec::new(),
         }
     }
 

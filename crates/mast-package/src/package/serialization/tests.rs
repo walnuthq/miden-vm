@@ -122,6 +122,7 @@ fn build_package_with_debug_info() -> Package {
             asm_ops: vec![DebugSourceAsmOp::new(0, None, context_name_idx, op_name_idx, 1)],
             debug_vars: Vec::new(),
             inline_calls: Vec::new(),
+            call_frames: Vec::new(),
         })
         .unwrap();
     assert_eq!(added_source_node, source_node);

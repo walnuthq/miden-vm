@@ -812,6 +812,35 @@ impl Package {
                     });
                 }
             }
+            for row in source_node.call_frames.iter() {
+                let exec_op_end = match exec_node {
+                    MastNode::Block(block) => block.num_operations(),
+                    _ => source_node.op_end,
+                };
+                let external_boundary = exec_node.is_external()
+                    && row.op_start == source_node.op_start
+                    && row.op_end == source_node.op_end;
+                if !external_boundary
+                    && (row.op_start >= row.op_end
+                        || row.op_start < source_node.op_start
+                        || row.op_end > exec_op_end)
+                {
+                    return Err(PackageDebugInfoError::InvalidReference {
+                        message: format!(
+                            "debug call frame for source node {source_id:?} has invalid operation range {}..{} for execution node {:?} operation count {exec_op_end}",
+                            row.op_start, row.op_end, source_node.exec_node,
+                        ),
+                    });
+                }
+                if debug_info.get_function(row.function_idx).is_none() {
+                    return Err(PackageDebugInfoError::InvalidReference {
+                        message: format!(
+                            "debug call frame function index {} is outside debug function table length {function_count}",
+                            row.function_idx,
+                        ),
+                    });
+                }
+            }
         }
 
         for export in self.manifest.exports() {
@@ -1478,6 +1507,7 @@ mod tests {
             asm_ops: Vec::new(),
             debug_vars: Vec::new(),
             inline_calls: Vec::new(),
+            call_frames: Vec::new(),
         }
     }
 
@@ -1596,6 +1626,7 @@ mod tests {
                     asm_ops: vec![DebugSourceAsmOp::new(0, None, context_name_idx, op_name_idx, 1)],
                     debug_vars: Vec::new(),
                     inline_calls: Vec::new(),
+                    call_frames: Vec::new(),
                 })
                 .expect("failed to add debug source node");
             assert_eq!(source_node, DebugSourceNodeId::from(source_idx as u32));
@@ -1706,6 +1737,7 @@ mod tests {
                 asm_ops: vec![DebugSourceAsmOp::new(0, None, context_name_idx, op_name_idx, 1)],
                 debug_vars: Vec::new(),
                 inline_calls: Vec::new(),
+                call_frames: Vec::new(),
             })
             .unwrap();
         builder.add_root(source_node);
@@ -2487,6 +2519,7 @@ mod tests {
                     asm_ops: vec![DebugSourceAsmOp::new(0, None, context_name_idx, op_name_idx, 1)],
                     debug_vars: Vec::new(),
                     inline_calls: Vec::new(),
+                    call_frames: Vec::new(),
                 })
                 .unwrap();
             builder.add_root(source_node);

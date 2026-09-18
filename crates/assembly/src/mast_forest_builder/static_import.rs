@@ -9,8 +9,8 @@ use miden_core::{
     },
 };
 use miden_mast_package::debug_info::{
-    DebugFunctionIdx, DebugInfoTableRemapping, DebugSourceAsmOp, DebugSourceInlineCall,
-    DebugSourceNodeId, DebugSourceVar, PackageDebugInfo,
+    DebugFunctionIdx, DebugInfoTableRemapping, DebugSourceAsmOp, DebugSourceCallFrame,
+    DebugSourceInlineCall, DebugSourceNodeId, DebugSourceVar, PackageDebugInfo,
 };
 
 use super::{
@@ -37,6 +37,7 @@ pub(super) struct StaticSourceMetadata {
     asm_ops: Vec<DebugSourceAsmOp>,
     debug_vars: Vec<DebugSourceVar>,
     inline_calls: Vec<DebugSourceInlineCall>,
+    call_frames: Vec<DebugSourceCallFrame>,
     functions: Vec<DebugFunctionIdx>,
 }
 
@@ -73,6 +74,7 @@ impl MastForestBuilder {
             asm_ops,
             debug_vars,
             inline_calls,
+            call_frames,
             functions,
         } = source_metadata.unwrap_or_default();
 
@@ -84,6 +86,7 @@ impl MastForestBuilder {
                 asm_ops,
                 debug_vars,
                 inline_calls,
+                call_frames,
                 functions,
             },
             source_op_range: op_range,
@@ -553,6 +556,22 @@ impl MastForestBuilder {
                 Ok(DebugSourceInlineCall { op_idx: row.op_idx, callee_idx, loc_idx })
             })
             .collect::<Result<Vec<_>, Report>>()?;
+        let call_frames = package_debug_info
+            .call_frames_for_source_node(source_node_id)
+            .map(|row| {
+                let function_idx = remapped_debug_index(
+                    tables.function(row.function_idx),
+                    row.function_idx,
+                    "function",
+                )?;
+                Ok(DebugSourceCallFrame {
+                    op_start: row.op_start,
+                    op_end: row.op_end,
+                    function_idx,
+                    inherited_inline_calls: row.inherited_inline_calls,
+                })
+            })
+            .collect::<Result<Vec<_>, Report>>()?;
         let op_range = package_debug_info.source_node(source_node_id).map(|source_node| {
             self.unadjust_source_block_range(
                 source_forest,
@@ -602,6 +621,20 @@ impl MastForestBuilder {
                 inline_calls,
                 |inline_call| &mut inline_call.op_idx,
             ),
+            call_frames: call_frames
+                .into_iter()
+                .map(|mut call_frame| {
+                    let (op_start, op_end) = self.unadjust_call_frame_range(
+                        source_forest,
+                        source_exec_node_id,
+                        call_frame.op_start as usize,
+                        call_frame.op_end as usize,
+                    );
+                    call_frame.op_start = op_start as u32;
+                    call_frame.op_end = op_end as u32;
+                    call_frame
+                })
+                .collect(),
             functions,
         })
     }
@@ -623,6 +656,32 @@ impl MastForestBuilder {
                 block.op_batches(),
             );
             (unadjusted_indices[0], unadjusted_indices[1] + 1)
+        } else {
+            (op_start, op_end)
+        }
+    }
+
+    fn unadjust_call_frame_range(
+        &self,
+        source_forest: &MastForest,
+        source_node_id: MastNodeId,
+        op_start: usize,
+        op_end: usize,
+    ) -> (usize, usize) {
+        if op_start == op_end {
+            return (op_start, op_end);
+        }
+
+        if let Some(MastNode::Block(block)) = source_forest.get_node_by_id(source_node_id) {
+            let raw_op_count = block.raw_operations().count();
+            let op_start =
+                BasicBlockNode::unadjust_asm_op_indices(vec![op_start], block.op_batches())[0];
+            let op_end = if op_end == block.num_operations() as usize {
+                raw_op_count
+            } else {
+                BasicBlockNode::unadjust_asm_op_indices(vec![op_end], block.op_batches())[0]
+            };
+            (op_start, op_end)
         } else {
             (op_start, op_end)
         }

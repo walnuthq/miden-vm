@@ -108,6 +108,7 @@ fn build_package_with_debug_options(
             asm_ops: vec![asm_op; asm_op_repetitions],
             debug_vars: vec![debug_var.clone()],
             inline_calls: Vec::new(),
+            call_frames: Vec::new(),
         })
         .expect("seed debug info has one source node");
     debug_info.add_root(source_node);

@@ -11,8 +11,9 @@ use miden_core::{
     utils::IndexVec,
 };
 use miden_mast_package::debug_info::{
-    DebugFunctionIdx, DebugInfoBuilder, DebugSourceAsmOp, DebugSourceInlineCall, DebugSourceNodeId,
-    DebugSourceVar, PackageDebugInfo, PackageDebugInfoBuilder, SourceNode,
+    DebugFunctionIdx, DebugInfoBuilder, DebugSourceAsmOp, DebugSourceCallFrame,
+    DebugSourceInlineCall, DebugSourceNodeId, DebugSourceVar, PackageDebugInfo,
+    PackageDebugInfoBuilder, SourceNode,
 };
 
 use super::{
@@ -335,6 +336,7 @@ impl MastForestFinalizer {
                     asm_ops,
                     debug_vars,
                     inline_calls: vec![],
+                    call_frames: vec![],
                 })
                 .map_err(|_| {
                     Report::new(MastForestBuilderError::AddSourceNode {
@@ -354,7 +356,9 @@ impl MastForestFinalizer {
 
         for &source_ref in &live_source_refs {
             let pending_source_node = &source_debug_info[source_ref];
-            if pending_source_node.inline_calls.is_empty() {
+            if pending_source_node.inline_calls.is_empty()
+                && pending_source_node.call_frames.is_empty()
+            {
                 continue;
             }
 
@@ -398,6 +402,30 @@ impl MastForestFinalizer {
                 })
                 .collect::<Result<Vec<_>, Report>>()?;
             debug_info[source_id].inline_calls = inline_calls;
+            if !pending_source_node.call_frames.is_empty() {
+                let call_frames = pending_source_node
+                    .call_frames
+                    .iter()
+                    .map(|call_frame| {
+                        let (op_start, op_end) = adjust_call_frame_range(
+                            &mast_forest[exec_node],
+                            call_frame.op_start as usize,
+                            call_frame.op_end as usize,
+                        );
+                        Ok(DebugSourceCallFrame {
+                            op_start: u32::try_from(op_start).unwrap(),
+                            op_end: u32::try_from(op_end).unwrap(),
+                            function_idx: remapped(
+                                tables.function(call_frame.function_idx),
+                                call_frame.function_idx,
+                                "function",
+                            )?,
+                            inherited_inline_calls: call_frame.inherited_inline_calls,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, Report>>()?;
+                debug_info[source_id].call_frames = call_frames;
+            }
         }
 
         for (index, function) in source_debug_info.functions().iter().enumerate() {
@@ -438,6 +466,27 @@ fn adjust_source_op_range(node: &MastNode, op_start: usize, op_end: usize) -> (u
                 block.op_batches(),
             );
             (adjusted[0], adjusted[1] + 1)
+        },
+        _ => (op_start, op_end),
+    }
+}
+
+fn adjust_call_frame_range(node: &MastNode, op_start: usize, op_end: usize) -> (usize, usize) {
+    if op_start == op_end {
+        return (op_start, op_end);
+    }
+
+    match node {
+        MastNode::Block(block) => {
+            let raw_op_count = block.raw_operations().count();
+            let op_start =
+                BasicBlockNode::adjust_asm_op_indices(vec![op_start], block.op_batches())[0];
+            let op_end = if op_end == raw_op_count {
+                block.num_operations() as usize
+            } else {
+                BasicBlockNode::adjust_asm_op_indices(vec![op_end], block.op_batches())[0]
+            };
+            (op_start, op_end)
         },
         _ => (op_start, op_end),
     }

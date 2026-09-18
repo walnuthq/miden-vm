@@ -7,6 +7,7 @@
 - [BREAKING] Add a precompile prover memory budget, with a 64GiB default ([#3799](https://github.com/0xMiden/miden-vm/pull/3799)).
 #### Changes
 
+- [BREAKING] Added assembler-recorded procedure frame ranges and `ResumeContext::debug_call_frames()` for event-free debugger backtraces, including merged `exec` bodies and dynamic/external calls. The package debug-info format is now version 4; packages with older debug info require the matching toolchain or recompilation.
 - Improved lifted STARK prover performance: LogUp fractions are built and accumulated in row chunks with a parallel accumulator scan, and DEEP reduction avoids element-wise buffer swaps and per-height group buffers ([#3851](https://github.com/0xMiden/miden-vm/pull/3851)).
 
 #### Fixes

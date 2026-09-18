@@ -1,10 +1,12 @@
 //! This module defines items relevant to controlling execution stopping conditions.
 
-use alloc::{sync::Arc, vec::Vec};
+use alloc::{sync::Arc, vec, vec::Vec};
 use core::ops::ControlFlow;
 
 use miden_core::{mast::MastForest, program::KernelDescriptor};
-use miden_mast_package::debug_info::{DebugSourceNodeId, PackageDebugInfo};
+use miden_mast_package::debug_info::{
+    DebugFunctionIdx, DebugFunctionInfo, DebugSourceNodeId, PackageDebugInfo,
+};
 
 use crate::{
     ExecutionError, FastProcessor, SourceInlineCallContext, Stopper,
@@ -25,7 +27,149 @@ pub struct ResumeContext {
     pub(crate) inline_call_contexts: Vec<Option<SourceInlineCallContext>>,
 }
 
+/// A source-level physical call frame resolved from package debug metadata.
+#[derive(Clone, Debug)]
+pub struct DebugCallFrame {
+    debug_info: Arc<PackageDebugInfo>,
+    function_idx: DebugFunctionIdx,
+    source_node_id: DebugSourceNodeId,
+    range_start: u32,
+    continuation_depth: usize,
+    inherited_inline_calls: usize,
+}
+
+impl DebugCallFrame {
+    pub fn function_idx(&self) -> DebugFunctionIdx {
+        self.function_idx
+    }
+
+    pub fn function(&self) -> &DebugFunctionInfo {
+        &self.debug_info[self.function_idx]
+    }
+
+    pub fn debug_info(&self) -> &PackageDebugInfo {
+        &self.debug_info
+    }
+
+    /// Number of inline frames at the end of the active inline chain owned by callers.
+    pub fn inherited_inline_calls(&self) -> usize {
+        self.inherited_inline_calls
+    }
+
+    /// Whether these descriptors refer to the same active invocation.
+    pub fn is_same_frame(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.debug_info, &other.debug_info)
+            && self.function_idx == other.function_idx
+            && self.source_node_id == other.source_node_id
+            && self.range_start == other.range_start
+            && self.continuation_depth == other.continuation_depth
+    }
+}
 impl ResumeContext {
+    /// Resolves the active source-level physical call chain for the next operation.
+    ///
+    /// This is a query-only operation over source-aware continuation state and package debug
+    /// metadata. It does not add work to the processor's normal execution path.
+    pub fn debug_call_frames(&self) -> Vec<DebugCallFrame> {
+        let continuations = self.continuation_stack.iter_with_source_node_ids().collect::<Vec<_>>();
+        let next_count = self.continuation_stack.iter_continuations_for_next_clock().count();
+        let next_start = continuations.len().saturating_sub(next_count);
+
+        let mut debug_info_by_continuation = vec![None; continuations.len()];
+        let mut active_debug_info = self.package_debug_info.clone();
+        let mut inline_depth_by_continuation = vec![0; continuations.len()];
+        let mut inline_depth = self.inline_call_contexts.len();
+        for (index, (continuation, _)) in continuations.iter().enumerate().rev() {
+            if let Continuation::EnterForest {
+                package_debug_info, inline_context_depth, ..
+            } = continuation
+            {
+                active_debug_info = package_debug_info.clone();
+                inline_depth = *inline_context_depth;
+            }
+            if matches!(continuation, Continuation::FinishDyn(_)) {
+                inline_depth = inline_depth.saturating_sub(1);
+            }
+            debug_info_by_continuation[index] = active_debug_info.clone();
+            inline_depth_by_continuation[index] = self.inline_call_contexts
+                [..inline_depth.min(self.inline_call_contexts.len())]
+                .iter()
+                .filter_map(Option::as_ref)
+                .map(|context| context.inline_calls().count())
+                .sum::<usize>();
+        }
+
+        let mut frames = Vec::new();
+        for (index, (continuation, source_node_id)) in continuations.iter().enumerate() {
+            let active_ancestor = matches!(
+                continuation,
+                Continuation::FinishJoin(_)
+                    | Continuation::FinishSplit(_)
+                    | Continuation::FinishLoop(_)
+                    | Continuation::FinishCall(_)
+                    | Continuation::FinishDyn(_)
+                    | Continuation::EnterForest { .. }
+            );
+            if index > next_start || (!active_ancestor && index != next_start) {
+                continue;
+            }
+            let (Some(debug_info), Some(source_node_id)) =
+                (debug_info_by_continuation[index].as_ref(), source_node_id)
+            else {
+                continue;
+            };
+            let Some(source_node) = debug_info.source_node(*source_node_id) else {
+                continue;
+            };
+            let op_idx = if index == next_start {
+                match continuation {
+                    Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch } => {
+                        let block = self.current_forest[*node_id].unwrap_basic_block();
+                        let offset = block
+                            .op_batches()
+                            .iter()
+                            .take(*batch_index)
+                            .map(|batch| batch.ops().len())
+                            .sum::<usize>();
+                        (offset + op_idx_in_batch) as u32
+                    },
+                    Continuation::Respan { node_id, batch_index } => {
+                        let block = self.current_forest[*node_id].unwrap_basic_block();
+                        block
+                            .op_batches()
+                            .iter()
+                            .take(*batch_index)
+                            .map(|batch| batch.ops().len() as u32)
+                            .sum()
+                    },
+                    Continuation::FinishBasicBlock(node_id) => self.current_forest[*node_id]
+                        .unwrap_basic_block()
+                        .num_operations()
+                        .saturating_sub(1),
+                    _ => source_node.op_start,
+                }
+            } else {
+                source_node.op_start
+            };
+            for row in &source_node.call_frames {
+                if (row.op_start <= op_idx && op_idx < row.op_end)
+                    || (row.op_start == row.op_end && op_idx == row.op_start)
+                {
+                    append_frame(
+                        &mut frames,
+                        debug_info,
+                        row.function_idx,
+                        *source_node_id,
+                        row.op_start,
+                        index,
+                        row.inherited_inline_calls as usize + inline_depth_by_continuation[index],
+                    );
+                }
+            }
+        }
+
+        frames
+    }
     /// Returns a reference to the continuation stack.
     pub fn continuation_stack(&self) -> &ContinuationStack<Arc<MastForest>> {
         &self.continuation_stack
@@ -55,6 +199,7 @@ impl ResumeContext {
             self.inline_call_contexts.len(),
             |depth, continuation| match continuation {
                 Continuation::EnterForest { inline_context_depth, .. } => *inline_context_depth,
+                Continuation::FinishDyn(_) => depth.saturating_sub(1),
                 _ => depth,
             },
         );
@@ -70,6 +215,24 @@ impl ResumeContext {
     }
 }
 
+fn append_frame(
+    frames: &mut Vec<DebugCallFrame>,
+    debug_info: &Arc<PackageDebugInfo>,
+    function_idx: DebugFunctionIdx,
+    source_node_id: DebugSourceNodeId,
+    range_start: u32,
+    continuation_depth: usize,
+    inherited_inline_calls: usize,
+) {
+    frames.push(DebugCallFrame {
+        debug_info: Arc::clone(debug_info),
+        function_idx,
+        source_node_id,
+        range_start,
+        continuation_depth,
+        inherited_inline_calls,
+    });
+}
 // STOPPERS
 // ===============================================================================================
 
